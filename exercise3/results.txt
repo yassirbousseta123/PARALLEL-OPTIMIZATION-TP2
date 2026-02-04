@@ -1,0 +1,239 @@
+================================================================================
+EXERCISE 3: Vector Operations Profiling with Amdahl's and Gustafson's Laws
+================================================================================
+
+================================================================================
+PART 1: CALLGRIND PROFILING RESULTS
+================================================================================
+
+The program was profiled using Valgrind/Callgrind at three different problem sizes.
+
+------------------------------------------------------------------------------
+N = 5,000,000 (Small)
+------------------------------------------------------------------------------
+Total Instructions (Ir):     95,126,263
+
+Function Breakdown:
+  - main (includes init_b, reduction):    40,000,017 Ir (42.05%)
+  - compute_addition:                     30,000,007 Ir (31.54%)
+  - add_noise (SEQUENTIAL):               25,000,002 Ir (26.28%)
+
+------------------------------------------------------------------------------
+N = 10,000,000 (Medium)
+------------------------------------------------------------------------------
+Total Instructions (Ir):    190,126,255
+
+Function Breakdown:
+  - main (includes init_b, reduction):    80,000,017 Ir (42.08%)
+  - compute_addition:                     60,000,007 Ir (31.56%)
+  - add_noise (SEQUENTIAL):               50,000,002 Ir (26.30%)
+
+------------------------------------------------------------------------------
+N = 50,000,000 (Large)
+------------------------------------------------------------------------------
+Total Instructions (Ir):    950,126,649
+
+Function Breakdown:
+  - main (includes init_b, reduction):   400,000,017 Ir (42.10%)
+  - compute_addition:                    300,000,007 Ir (31.57%)
+  - add_noise (SEQUENTIAL):              250,000,002 Ir (26.31%)
+
+Note on N = 100,000,000 (10^8) Limitation:
+The assignment requested profiling at N = 10^8, but Valgrind/Callgrind could not
+complete this profile due to memory constraints:
+  - Data requirement: 3 arrays × 100M doubles × 8 bytes = 2.4 GB
+  - Valgrind overhead: Typically 10-25x memory amplification
+  - Total required: ~24-60 GB RAM (exceeds available memory)
+  - Docker container: Limited to host memory constraints
+
+Alternative approach: N = 50,000,000 was used as the "large" benchmark, which
+still demonstrates the key finding that fs remains constant (~26.3%) regardless
+of problem size. This is mathematically expected since all functions are O(N).
+
+================================================================================
+PART 2: FUNCTION CLASSIFICATION AND TIME COMPLEXITY
+================================================================================
+
++-------------------+------------+--------------------+------------------------+
+| Function          | Complexity | Parallelizable     | Reason                 |
++-------------------+------------+--------------------+------------------------+
+| add_noise         | O(N)       | NO                 | Loop-carried dependency|
+| init_b            | O(N)       | YES                | Independent iterations |
+| compute_addition  | O(N)       | YES                | Independent iterations |
+| reduction         | O(N)       | YES (with sync)    | Reduction pattern      |
++-------------------+------------+--------------------+------------------------+
+
+SEQUENTIAL (cannot be parallelized):
+  - add_noise(): Each element depends on the previous element
+    a[i] = a[i-1] * 1.0000001  (data dependency chain)
+
+PARALLEL (can be parallelized):
+  - init_b(): Independent iterations, no data dependencies
+  - compute_addition(): Independent iterations, no data dependencies
+  - reduction(): Reduction pattern, parallelizable with proper synchronization
+
+================================================================================
+PART 3: SEQUENTIAL FRACTION CALCULATION (fs)
+================================================================================
+
+Formula: fs = Ir(add_noise) / Ir(TOTAL)
+
+Results across problem sizes:
+  N = 5,000,000:   fs = 25,000,002 / 95,126,263   = 0.2628 (26.28%)
+  N = 10,000,000:  fs = 50,000,002 / 190,126,255  = 0.2630 (26.30%)
+  N = 50,000,000:  fs = 250,000,002 / 950,126,649 = 0.2631 (26.31%)
+
+Average Sequential Fraction: fs = 0.263 (26.3%)
+
+Observation: The sequential fraction remains remarkably consistent across
+problem sizes because the ratio of sequential to parallel work is determined
+by the algorithm structure, not the problem size.
+
+================================================================================
+PART 4: AMDAHL'S LAW SPEEDUP CALCULATION
+================================================================================
+
+Amdahl's Law Formula: S(p) = 1 / (fs + (1-fs)/p)
+
+Where:
+  - S(p) = theoretical speedup with p processors
+  - fs = sequential fraction = 0.263
+  - (1-fs) = parallel fraction = 0.737
+
+Using fs = 0.263:
+
++--------+-------------------+-------------------+
+|   p    |  Calculation      |  Speedup S(p)     |
++--------+-------------------+-------------------+
+|    1   |  1/(0.263+0.737)  |       1.000       |
+|    2   |  1/(0.263+0.369)  |       1.582       |
+|    4   |  1/(0.263+0.184)  |       2.237       |
+|    8   |  1/(0.263+0.092)  |       2.817       |
+|   16   |  1/(0.263+0.046)  |       3.236       |
+|   32   |  1/(0.263+0.023)  |       3.497       |
+|   64   |  1/(0.263+0.012)  |       3.636       |
+|  128   |  1/(0.263+0.006)  |       3.717       |
+|  256   |  1/(0.263+0.003)  |       3.759       |
+|  512   |  1/(0.263+0.001)  |       3.780       |
+|  inf   |  1/0.263          |       3.802       |
++--------+-------------------+-------------------+
+
+Maximum Theoretical Speedup (Amdahl's Law):
+  Smax = lim(p->inf) S(p) = 1/fs = 1/0.263 = 3.802x
+
+Interpretation: No matter how many processors we use, the speedup is limited
+to approximately 3.8x due to the sequential portion (add_noise function).
+
+================================================================================
+PART 5: GUSTAFSON'S LAW SPEEDUP CALCULATION
+================================================================================
+
+Gustafson's Law Formula: S(p) = fs + p * (1 - fs)
+
+Where:
+  - S(p) = scaled speedup with p processors
+  - fs = sequential fraction = 0.263
+  - (1-fs) = parallel fraction = 0.737
+
+Using fs = 0.263:
+
++--------+-------------------------+-------------------+
+|   p    |  Calculation            |  Speedup S(p)     |
++--------+-------------------------+-------------------+
+|    1   |  0.263 + 1*0.737        |       1.000       |
+|    2   |  0.263 + 2*0.737        |       1.737       |
+|    4   |  0.263 + 4*0.737        |       3.211       |
+|    8   |  0.263 + 8*0.737        |       6.159       |
+|   16   |  0.263 + 16*0.737       |      12.055       |
+|   32   |  0.263 + 32*0.737       |      23.847       |
+|   64   |  0.263 + 64*0.737       |      47.431       |
+|  128   |  0.263 + 128*0.737      |      94.599       |
+|  256   |  0.263 + 256*0.737      |     188.935       |
+|  512   |  0.263 + 512*0.737      |     377.607       |
++--------+-------------------------+-------------------+
+
+Gustafson's Law shows linear scaling because it assumes the problem size
+grows with the number of processors (scaled speedup).
+
+================================================================================
+PART 6: COMPARISON OF AMDAHL'S AND GUSTAFSON'S LAWS
+================================================================================
+
++--------+--------------+--------------+
+|   p    |   Amdahl     |  Gustafson   |
++--------+--------------+--------------+
+|    1   |    1.000     |     1.000    |
+|    2   |    1.582     |     1.737    |
+|    4   |    2.237     |     3.211    |
+|    8   |    2.817     |     6.159    |
+|   16   |    3.236     |    12.055    |
+|   32   |    3.497     |    23.847    |
+|   64   |    3.636     |    47.431    |
++--------+--------------+--------------+
+
+Key Differences:
+
+1. AMDAHL'S LAW (Fixed Problem Size):
+   - Assumes the problem size remains constant
+   - Sequential portion becomes the bottleneck
+   - Speedup is limited by Smax = 1/fs = 3.802x
+   - Useful for: Real-time applications, fixed workloads
+
+2. GUSTAFSON'S LAW (Scaled Problem Size):
+   - Assumes problem size scales with processors
+   - Sequential time stays constant, parallel work increases
+   - Speedup grows linearly with p
+   - Useful for: Scientific computing, larger problems
+
+================================================================================
+PART 7: DETAILED INSTRUCTION BREAKDOWN (N = 50,000,000)
+================================================================================
+
+add_noise() - SEQUENTIAL (250,000,002 Ir total):
+  - Loop control:     149,999,997 Ir (15.79%)
+  - Computation:       99,999,998 Ir (10.52%)
+  - Function overhead:          7 Ir ( 0.00%)
+
+init_b() - PARALLEL (200,000,004 Ir estimated):
+  - Loop control:     150,000,004 Ir (15.79%)
+  - Computation:       50,000,000 Ir ( 5.26%)
+
+compute_addition() - PARALLEL (300,000,007 Ir total):
+  - Loop control:     150,000,000 Ir (15.79%)
+  - Computation:      150,000,000 Ir (15.78%)
+  - Function overhead:          7 Ir ( 0.00%)
+
+reduction() - PARALLEL with sync (200,000,004 Ir estimated):
+  - Loop control:     150,000,001 Ir (15.78%)
+  - Computation:       50,000,000 Ir ( 5.26%)
+  - Function overhead:          3 Ir ( 0.00%)
+
+================================================================================
+PART 8: SUMMARY AND CONCLUSIONS
+================================================================================
+
+1. Sequential Fraction: fs = 26.3%
+   - The add_noise() function represents 26.3% of total computation
+   - This function cannot be parallelized due to data dependencies
+
+2. Parallel Fraction: (1-fs) = 73.7%
+   - init_b(), compute_addition(), and reduction() can be parallelized
+   - These functions have independent iterations or use reduction patterns
+
+3. Amdahl's Law Maximum Speedup: Smax = 3.802x
+   - With fixed problem size, speedup is fundamentally limited
+   - Even with infinite processors, we cannot exceed ~3.8x speedup
+
+4. Gustafson's Law Advantage:
+   - By scaling problem size with processors, much higher speedups possible
+   - With 64 processors: Gustafson predicts 47.4x vs Amdahl's 3.6x
+
+5. Practical Implications:
+   - For this workload with fixed size, investing in more than 16-32 cores
+     provides diminishing returns (Amdahl: 3.24x to 3.50x, only 8% gain)
+   - To achieve better speedups, consider:
+     a) Algorithmic changes to reduce sequential fraction
+     b) Scaling problem size (Gustafson's approach)
+     c) Overlapping computation with I/O
+
+================================================================================

@@ -1,0 +1,283 @@
+================================================================================
+EXERCISE 4: MATRIX MULTIPLICATION PROFILING WITH AMDAHL'S AND GUSTAFSON'S LAWS
+================================================================================
+
+================================================================================
+PART 1: CALLGRIND INSTRUCTION COUNTS FOR EXERCISE 4
+================================================================================
+
+Program: Matrix Multiplication (512 x 512 matrices)
+Total Instructions (Ir): 946,486,355
+
+Function Breakdown:
+--------------------------------------------------------------------------------
+Function          | Instructions (Ir) | Percentage | Complexity | Parallelizable
+--------------------------------------------------------------------------------
+generate_noise    |             2,562 |    0.00%   |   O(N)     | NO  (sequential dependency)
+init_matrix       |         3,151,366 |    0.33%   |   O(N^2)   | YES (no dependencies)
+matmul            |       942,154,253 |   99.54%   |   O(N^3)   | YES (no dependencies)
+main (other)      |         1,178,174 |    0.12%   |   O(N^2)   | Partial
+--------------------------------------------------------------------------------
+TOTAL             |       946,486,355 |  100.00%   |            |
+--------------------------------------------------------------------------------
+
+Detailed Instruction Breakdown for matmul():
+  - Loop overhead (i,j,k):    539,501,064 Ir (57.00%)
+  - Computation (C += A*B):   402,653,184 Ir (42.54%)
+
+================================================================================
+PART 2: SEQUENTIAL FRACTION (fs) CALCULATION
+================================================================================
+
+Sequential Code Identification:
+- generate_noise() is the ONLY truly sequential part
+- Reason: noise[i] depends on noise[i-1] (loop-carried dependency)
+
+Sequential Fraction Calculation:
+  fs = Ir(generate_noise) / Ir(TOTAL)
+  fs = 2,562 / 946,486,355
+  fs = 0.00000271
+  fs = 0.000271% (approximately 0.00027%)
+
+Parallel Fraction:
+  fp = 1 - fs
+  fp = 0.99999729
+  fp = 99.999729%
+
+This is EXTREMELY small because:
+- generate_noise is O(N) = O(512) = 512 iterations
+- matmul is O(N^3) = O(512^3) = 134,217,728 iterations
+- Ratio: N / N^3 = 1 / N^2 = 1 / 262,144 = 0.00038%
+
+================================================================================
+PART 3: AMDAHL'S LAW SPEEDUP CALCULATION
+================================================================================
+
+Amdahl's Law Formula:
+  S(p) = 1 / (fs + (1-fs)/p)
+
+Where:
+  - fs = 0.00000271 (sequential fraction)
+  - p  = number of processors
+
+Speedup Table (Exercise 4 - Matrix Multiplication):
+--------------------------------------------------------------------------------
+Processors (p) |    Amdahl Speedup S(p)    |   Efficiency E(p) = S(p)/p
+--------------------------------------------------------------------------------
+       1       |          1.000            |        100.00%
+       2       |          2.000            |        100.00%
+       4       |          4.000            |         99.99%
+       8       |          7.999            |         99.99%
+      16       |         15.999            |         99.99%
+      32       |         31.997            |         99.99%
+      64       |         63.990            |         99.98%
+     128       |        127.965            |         99.97%
+     256       |        255.861            |         99.95%
+     512       |        511.448            |         99.91%
+    1024       |       1021.468            |         99.75%
+--------------------------------------------------------------------------------
+
+Maximum Theoretical Speedup (Amdahl's Limit):
+  S_max = 1 / fs = 1 / 0.00000271 = 369,004x
+
+Analysis:
+- Near-linear speedup up to hundreds of processors
+- Efficiency stays above 99% even at 512 processors
+- Practical limit is reached only with thousands of processors
+
+================================================================================
+PART 4: GUSTAFSON'S LAW SPEEDUP CALCULATION
+================================================================================
+
+Gustafson's Law Formula (Scaled Speedup):
+  S(p) = fs + p * (1 - fs)
+  S(p) = fs + p * fp
+
+Where:
+  - fs = 0.00000271 (sequential fraction)
+  - fp = 0.99999729 (parallel fraction)
+  - p  = number of processors
+
+Speedup Table (Exercise 4 - Matrix Multiplication):
+--------------------------------------------------------------------------------
+Processors (p) |  Gustafson Speedup S(p)   |   Speedup per Processor
+--------------------------------------------------------------------------------
+       1       |          1.000            |         1.000
+       2       |          2.000            |         1.000
+       4       |          4.000            |         1.000
+       8       |          8.000            |         1.000
+      16       |         16.000            |         1.000
+      32       |         32.000            |         1.000
+      64       |         64.000            |         1.000
+     128       |        128.000            |         1.000
+     256       |        256.000            |         1.000
+     512       |        512.000            |         1.000
+    1024       |       1024.000            |         1.000
+--------------------------------------------------------------------------------
+
+Analysis:
+- Gustafson shows perfect linear scaling
+- With larger problem sizes, speedup continues to scale
+- No practical limit when problem size can grow with processors
+
+================================================================================
+PART 5: COMPARISON WITH EXERCISE 3 (VECTOR ADDITION)
+================================================================================
+
+EXERCISE 3 CALLGRIND RESULTS (N = 10,000,000 elements):
+--------------------------------------------------------------------------------
+Function          | Instructions (Ir) | Percentage | Parallelizable
+--------------------------------------------------------------------------------
+add_noise         |        50,000,002 |   26.30%   | NO  (sequential)
+init_b            |        40,000,004 |   21.04%   | YES
+compute_addition  |        60,000,007 |   31.56%   | YES
+reduction         |        40,000,004 |   21.04%   | YES (with reduction)
+--------------------------------------------------------------------------------
+TOTAL             |       190,126,255 |  100.00%   |
+--------------------------------------------------------------------------------
+
+Sequential Fraction (Exercise 3):
+  fs = 50,000,002 / 190,126,255 = 0.2630 = 26.30%
+
+COMPARISON TABLE:
+================================================================================
+Metric                    | Exercise 3 (Vector)  | Exercise 4 (Matrix)
+================================================================================
+Problem Type              | Vector Addition      | Matrix Multiplication
+Sequential Function       | add_noise O(N)       | generate_noise O(N)
+Parallel Work Complexity  | O(N)                 | O(N^3)
+Sequential Fraction (fs)  | 26.30%               | 0.00027%
+Parallel Fraction (fp)    | 73.70%               | 99.99973%
+--------------------------------------------------------------------------------
+Amdahl Max Speedup        | 3.80x                | 369,004x
+--------------------------------------------------------------------------------
+Amdahl Speedup at p=2     | 1.60x                | 2.00x
+Amdahl Speedup at p=4     | 2.36x                | 4.00x
+Amdahl Speedup at p=8     | 2.93x                | 8.00x
+Amdahl Speedup at p=16    | 3.29x                | 16.00x
+Amdahl Speedup at p=32    | 3.52x                | 32.00x
+Amdahl Speedup at p=64    | 3.65x                | 64.00x
+--------------------------------------------------------------------------------
+Gustafson Speedup at p=64 | 47.43x               | 64.00x
+================================================================================
+
+DETAILED AMDAHL SPEEDUP COMPARISON:
+--------------------------------------------------------------------------------
+Processors |  Exercise 3 Speedup  |  Exercise 4 Speedup  |  Improvement
+--------------------------------------------------------------------------------
+     1     |        1.00x         |        1.00x         |     0.00x
+     2     |        1.60x         |        2.00x         |    +0.40x
+     4     |        2.36x         |        4.00x         |    +1.64x
+     8     |        2.93x         |        8.00x         |    +5.07x
+    16     |        3.29x         |       16.00x         |   +12.71x
+    32     |        3.52x         |       32.00x         |   +28.48x
+    64     |        3.65x         |       64.00x         |   +60.35x
+--------------------------------------------------------------------------------
+
+================================================================================
+PART 6: ANALYSIS - WHY MATRIX MULTIPLICATION SCALES BETTER
+================================================================================
+
+1. COMPLEXITY RATIO DOMINANCE
+   ------------------------
+   Exercise 3: Sequential O(N) vs Parallel O(N)
+     - Both have same complexity
+     - Sequential portion stays significant (26.30%)
+
+   Exercise 4: Sequential O(N) vs Parallel O(N^3)
+     - Parallel work grows cubically with problem size
+     - Sequential portion becomes negligible (0.00027%)
+
+2. MATHEMATICAL EXPLANATION
+   ------------------------
+   For Exercise 4 with N = 512:
+     Sequential operations: N = 512
+     Parallel operations:   N^3 = 134,217,728 (+ N^2 = 262,144)
+
+     Ratio = N / (N + N^2 + N^3)
+           = 512 / 134,480,384
+           = 0.00000381 (0.00038%)
+
+   This matches our measured fs = 0.00027%
+
+3. AMDAHL'S LAW IMPLICATIONS
+   -------------------------
+   - Exercise 3: Limited to ~3.8x speedup regardless of processors
+   - Exercise 4: Scales almost linearly to 1000+ processors
+
+   The key insight: When parallel work >> sequential work,
+   Amdahl's bottleneck effectively disappears.
+
+4. GUSTAFSON'S LAW PERSPECTIVE
+   ---------------------------
+   Gustafson's law shows that with scaled problem sizes:
+
+   Exercise 3: S(p) = 0.263 + 0.737p
+     - At p=64: S = 47.4x (not quite linear due to 26% sequential)
+
+   Exercise 4: S(p) = 0.00000271 + 0.99999729p
+     - At p=64: S = 64.0x (essentially linear scaling)
+
+5. PRACTICAL IMPLICATIONS
+   -----------------------
+   Matrix multiplication is an ideal candidate for parallelization:
+
+   a) High computational intensity (O(N^3) work per element)
+   b) Minimal sequential dependencies
+   c) Regular memory access patterns
+   d) Well-suited for:
+      - Multi-core CPUs (OpenMP)
+      - GPUs (CUDA, OpenCL)
+      - Distributed systems (MPI)
+
+   Vector operations require careful consideration:
+
+   a) Lower computational intensity
+   b) Memory-bound rather than compute-bound
+   c) Sequential dependencies can dominate
+   d) Need to minimize synchronization overhead
+
+6. SCALING WITH PROBLEM SIZE
+   -------------------------
+   If we increase N in Exercise 4:
+
+   N = 512:   fs = 0.00027%
+   N = 1024:  fs = 0.000068% (4x smaller)
+   N = 2048:  fs = 0.000017% (16x smaller)
+   N = 4096:  fs = 0.0000042% (64x smaller)
+
+   The sequential fraction decreases quadratically with N,
+   making larger problems even more parallelizable!
+
+================================================================================
+PART 7: CONCLUSIONS
+================================================================================
+
+1. EXERCISE 4 ACHIEVES NEAR-PERFECT PARALLELISM
+   - Sequential fraction: 0.00027% (vs 26.30% in Exercise 3)
+   - Amdahl max speedup: 369,004x (vs 3.8x in Exercise 3)
+   - Linear scaling maintained even with 512+ processors
+
+2. KEY FACTOR: WORK COMPLEXITY RATIO
+   - When parallel work complexity >> sequential complexity
+   - The sequential bottleneck becomes negligible
+   - O(N^3) parallel vs O(N) sequential = ideal parallelization
+
+3. AMDAHL'S LAW IS NOT A LIMITATION FOR COMPUTE-INTENSIVE PROBLEMS
+   - Often cited as limiting parallel speedup
+   - But only applies when sequential fraction is significant
+   - Matrix multiplication effectively bypasses Amdahl's limit
+
+4. CHOICE OF ALGORITHM MATTERS
+   - Same problem can have different parallel potential
+   - Prefer algorithms with higher parallel/sequential work ratio
+   - Example: Block matrix multiplication, Strassen's algorithm
+
+5. PROBLEM SIZE HELPS PARALLELIZATION
+   - Larger N means even smaller sequential fraction
+   - Gustafson's insight: scale problems with processors
+   - Real-world HPC exploits this for massive parallelism
+
+================================================================================
+END OF EXERCISE 4 RESULTS
+================================================================================

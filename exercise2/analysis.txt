@@ -1,0 +1,247 @@
+================================================================================
+              EXERCISE 2: INSTRUCTION SCHEDULING AND ILP ANALYSIS
+================================================================================
+
+1. TIMING COMPARISON TABLE
+================================================================================
+
++------------------+-------------+-----------+-------------------+
+| Version          | Time (sec)  | Speedup   | Notes             |
++------------------+-------------+-----------+-------------------+
+| exercise2_O0     | 0.121       | 1.00x     | Baseline          |
+| exercise2_O2     | 0.053       | 2.28x     | Compiler optimized|
+| manual_O0        | 0.066       | 1.83x     | Manual + no opts  |
+| manual_O2        | 0.017       | 7.12x     | Manual + compiler |
++------------------+-------------+-----------+-------------------+
+
+Key Observation: Manual optimization at -O0 achieves 80% of the speedup
+that -O2 provides, demonstrating the importance of source-level optimizations.
+
+
+2. KEY ASSEMBLY DIFFERENCES
+================================================================================
+
+2.1 LOOP STRUCTURE: O0 vs O2
+-----------------------------
+
+O0 Assembly (exercise2.c -O0):
+```assembly
+LBB0_2:                                 ; Loop body
+    ldur    d0, [x29, #-16]             ; Load a from memory
+    ldur    d1, [x29, #-24]             ; Load b from memory
+    ldur    d2, [x29, #-32]             ; Load x from memory
+    fmadd   d0, d0, d1, d2              ; x = a*b + x (fused multiply-add)
+    stur    d0, [x29, #-32]             ; Store x back to memory
+    ldur    d0, [x29, #-16]             ; Load a again
+    ldur    d1, [x29, #-24]             ; Load b again
+    ldur    d2, [x29, #-40]             ; Load y from memory
+    fmadd   d0, d0, d1, d2              ; y = a*b + y
+    stur    d0, [x29, #-40]             ; Store y back to memory
+LBB0_3:                                 ; Loop increment
+    ldr     w8, [sp, #36]               ; Load counter
+    add     w8, w8, #1                  ; Increment by 1
+    str     w8, [sp, #36]               ; Store counter
+```
+
+O2 Assembly (exercise2.c -O2):
+```assembly
+    fmov.2d v0, #3.75000000             ; Precomputed: a*b = 1.5*2.5 = 3.75
+LBB0_1:                                 ; Loop body (unrolled 4x)
+    fadd.2d v1, v1, v0                  ; SIMD add (x,y) += (3.75, 3.75)
+    fadd.2d v1, v1, v0                  ; SIMD add iteration 2
+    fadd.2d v1, v1, v0                  ; SIMD add iteration 3
+    fadd.2d v1, v1, v0                  ; SIMD add iteration 4
+    subs    w8, w8, #4                  ; Decrement counter by 4
+    b.ne    LBB0_1                      ; Loop back if not zero
+```
+
+
+2.2 REGISTER vs MEMORY USAGE
+-----------------------------
+
+O0: All variables stored in memory (stack)
+    - a at [x29, #-16]
+    - b at [x29, #-24]
+    - x at [x29, #-32]
+    - y at [x29, #-40]
+    - Counter at [sp, #36]
+    Total memory ops per iteration: 12 loads + 3 stores = 15 ops
+
+O2: All computation in registers
+    - v0 holds precomputed constant 3.75 (SIMD vector)
+    - v1 holds both x and y as a SIMD vector
+    - w8 holds loop counter
+    Total memory ops per iteration: 0 (all in registers)
+
+
+2.3 INSTRUCTION COUNT PER LOGICAL ITERATION
+--------------------------------------------
+
+O0: ~20 instructions per iteration
+    - 8 memory loads
+    - 2 fmadd operations
+    - 3 memory stores
+    - Loop control overhead
+
+O2: ~1.5 instructions per logical iteration (after unrolling)
+    - 4 fadd.2d for 4 iterations = 1 per iteration
+    - subs + branch shared across 4 iterations = 0.5 per iteration
+
+
+3. COMPILER OPTIMIZATIONS AT -O2
+================================================================================
+
+3.1 CONSTANT FOLDING
+--------------------
+The compiler precomputes a*b = 1.5 * 2.5 = 3.75 at compile time.
+Instead of computing the multiplication 100 million times, it's done once.
+
+Source:  x = a * b + x;
+O0:      fmadd d0, d0, d1, d2    ; Multiply and add at runtime
+O2:      fadd.2d v1, v1, v0      ; Only add (3.75 is precomputed)
+
+
+3.2 SIMD VECTORIZATION (NEON)
+------------------------------
+The compiler uses ARM NEON SIMD instructions to process x and y simultaneously.
+
+.2d suffix = 2 x 64-bit doubles in a 128-bit vector register
+v0 = [3.75, 3.75]  ; Both elements are 3.75
+v1 = [x, y]        ; x and y packed together
+
+One instruction `fadd.2d v1, v1, v0` computes BOTH:
+- x = x + 3.75
+- y = y + 3.75
+
+
+3.3 LOOP UNROLLING (4x)
+------------------------
+The loop body is replicated 4 times, reducing loop overhead:
+- Original: 100,000,000 iterations with branch overhead each time
+- Optimized: 25,000,000 iterations (4 ops per iteration)
+
+Benefits:
+- 75% reduction in branch instructions
+- Better instruction pipeline utilization
+- Enables more instruction-level parallelism
+
+
+3.4 REGISTER ALLOCATION
+------------------------
+All frequently accessed values stay in registers:
+- Eliminates memory latency (L1 cache: ~4 cycles vs register: 0 cycles)
+- Reduces memory bandwidth pressure
+- Enables out-of-order execution to find more parallelism
+
+
+4. MANUAL OPTIMIZATION ANALYSIS
+================================================================================
+
+4.1 MANUAL OPTIMIZATIONS APPLIED
+---------------------------------
+1. Constant folding: double ab = a * b;
+2. Multiple accumulators: x1,x2,x3,x4 and y1,y2,y3,y4
+3. Loop unrolling: 4 iterations per loop iteration
+
+4.2 MANUAL O0 ASSEMBLY ANALYSIS
+--------------------------------
+```assembly
+    fmul    d0, d0, d1              ; ab = a * b (once, before loop)
+    stur    d0, [x29, #-32]         ; Store ab
+LBB0_2:                             ; Loop body
+    ldur    d0, [x29, #-40]         ; Load x1
+    ldur    d1, [x29, #-32]         ; Load ab
+    fadd    d0, d0, d1              ; x1 += ab
+    stur    d0, [x29, #-40]         ; Store x1
+    ; ... 7 more similar sequences for x2,x3,x4,y1,y2,y3,y4
+LBB0_3:
+    add     w8, w8, #4              ; Increment by 4
+```
+
+4.3 COMPARISON: DOES MANUAL O0 MATCH O2?
+-----------------------------------------
+
+Performance:
+- Manual O0: 0.066 seconds
+- Compiler O2: 0.053 seconds
+- Ratio: Manual O0 is ~24% slower than O2
+
+The manual optimization DOES NOT fully match -O2 because:
+
+1. NO SIMD VECTORIZATION
+   - Manual O0: 8 separate fadd instructions
+   - O2: 4 fadd.2d instructions (each does 2 adds)
+
+2. MEMORY OPERATIONS REMAIN
+   - Manual O0: Still loads/stores accumulators from memory each iteration
+   - O2: All values stay in registers
+
+3. NO INSTRUCTION REORDERING
+   - Manual O0: Sequential instruction execution
+   - O2: Compiler optimally schedules instructions for pipeline
+
+However, manual optimization at O0 captures most of the benefit:
+- Speedup vs baseline O0: 1.83x (manual) vs 2.28x (O2)
+- Manual achieves 80% of O2's speedup
+
+
+5. INSTRUCTION-LEVEL PARALLELISM (ILP) ANALYSIS
+================================================================================
+
+5.1 DATA DEPENDENCIES IN ORIGINAL CODE
+---------------------------------------
+Original:  x = a * b + x;
+
+Dependency chain:
+    multiply (a*b) -> add (result + x) -> store x -> next iteration loads x
+                      ^__________________________________|
+
+This creates a serial dependency - each iteration depends on the previous.
+
+5.2 HOW OPTIMIZATIONS BREAK DEPENDENCIES
+-----------------------------------------
+
+Multiple Accumulators:
+    x1 += ab;  x2 += ab;  x3 += ab;  x4 += ab;  (4 independent chains)
+
+Each accumulator has its own dependency chain, allowing 4 operations
+to execute in parallel on a superscalar processor.
+
+SIMD:
+    Computes x and y simultaneously in one instruction.
+    2-way parallelism from vector operations.
+
+Loop Unrolling:
+    Exposes more independent instructions to the out-of-order engine.
+
+
+6. CONCLUSIONS
+================================================================================
+
+1. The -O2 compiler optimization provides a 2.28x speedup primarily through:
+   - Constant folding (removing 100M multiplications)
+   - SIMD vectorization (2x parallelism)
+   - Loop unrolling (4x, reducing branch overhead)
+   - Register allocation (eliminating memory latency)
+
+2. Manual source-level optimization at -O0 achieves 1.83x speedup through:
+   - Explicit constant folding
+   - Multiple accumulators for ILP
+   - Manual loop unrolling
+
+3. Manual optimization at -O0 captures 80% of O2's speedup but cannot match
+   it because:
+   - No SIMD without intrinsics
+   - O0 forces memory operations for all variables
+   - No instruction reordering/scheduling
+
+4. Best performance (7.12x) comes from combining manual optimization WITH
+   compiler optimization (-O2), showing they are complementary.
+
+5. Understanding ILP principles allows programmers to write code that helps
+   the compiler generate efficient code, even when full optimization isn't
+   available.
+
+================================================================================
+                                 END OF ANALYSIS
+================================================================================

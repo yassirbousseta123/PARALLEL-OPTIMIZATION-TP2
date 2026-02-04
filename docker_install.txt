@@ -1,0 +1,146 @@
+# Docker Commands for TP2 - Valgrind on Apple Silicon (M4 Max)
+# ============================================================
+
+# -----------
+# Valgrind does not support ARM64 (Apple Silicon) natively.
+# We use Docker with x86_64 emulation to run Valgrind.
+
+# ============================================================
+# 1. CREATE DOCKERFILE
+# ============================================================
+
+# Create a file named "Dockerfile" with this content:
+
+cat > Dockerfile << 'EOF'
+FROM --platform=linux/amd64 ubuntu:22.04
+RUN apt-get update && apt-get install -y \
+    gcc \
+    valgrind \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+EOF
+
+# ============================================================
+# 2. BUILD DOCKER IMAGE
+# ============================================================
+
+# Build the image (run from the directory containing Dockerfile)
+docker build --platform linux/amd64 -t valgrind-env .
+
+# Verify the image was created
+docker images | grep valgrind-env
+
+# ============================================================
+# 3. VERIFY VALGRIND WORKS
+# ============================================================
+
+docker run --platform linux/amd64 valgrind-env valgrind --version
+# Expected output: valgrind-3.18.1
+
+# ============================================================
+# 4. RUN VALGRIND ON YOUR C PROGRAM
+# ============================================================
+
+# Basic usage - mount current directory and run commands
+docker run --platform linux/amd64 -v "$(pwd)":/app valgrind-env \
+    sh -c "gcc -O2 -g program.c -o program && valgrind ./program"
+
+# ============================================================
+# 5. RUN CALLGRIND PROFILER (for instruction counting)
+# ============================================================
+
+# Single command to compile and profile
+docker run --platform linux/amd64 -v "$(pwd)":/app valgrind-env \
+    sh -c "gcc -O2 -g program.c -o program && \
+           valgrind --tool=callgrind ./program && \
+           callgrind_annotate callgrind.out.* --auto=yes"
+
+# ============================================================
+# 6. EXAMPLE: PROFILE EXERCISE 3
+# ============================================================
+
+cd "/Users/boussetayassir/Desktop/parralel computing/TP2/exercise3"
+
+docker run --platform linux/amd64 -v "$(pwd)":/app valgrind-env \
+    sh -c "gcc -O2 -g exercise3_small.c -o exercise3_small && \
+           valgrind --tool=callgrind ./exercise3_small && \
+           callgrind_annotate callgrind.out.* --auto=yes"
+
+# ============================================================
+# 7. EXAMPLE: PROFILE EXERCISE 4
+# ============================================================
+
+cd "/Users/boussetayassir/Desktop/parralel computing/TP2/exercise4"
+
+docker run --platform linux/amd64 -v "$(pwd)":/app valgrind-env \
+    sh -c "gcc -O2 -g exercise4.c -o exercise4 && \
+           valgrind --tool=callgrind ./exercise4 && \
+           callgrind_annotate callgrind.out.* --auto=yes"
+
+# ============================================================
+# 8. INTERACTIVE MODE (for debugging)
+# ============================================================
+
+# Enter container interactively
+docker run --platform linux/amd64 -it -v "$(pwd)":/app valgrind-env /bin/bash
+
+# Inside container, you can run:
+#   gcc -O2 -g program.c -o program
+#   valgrind --tool=callgrind ./program
+#   callgrind_annotate callgrind.out.* --auto=yes
+#   exit
+
+# ============================================================
+# 9. USEFUL DOCKER COMMANDS
+# ============================================================
+
+# List running containers
+docker ps
+
+# List all containers (including stopped)
+docker ps -a
+
+# Remove all stopped containers
+docker container prune
+
+# Remove the valgrind-env image
+docker rmi valgrind-env
+
+# Check Docker disk usage
+docker system df
+
+# Clean up unused Docker resources
+docker system prune
+
+# ============================================================
+# 10. CALLGRIND OUTPUT EXPLAINED
+# ============================================================
+
+# Callgrind produces output like:
+#
+# Ir                    file:function
+# 2,200,000,014 (33.85%) compute_addition
+# 1,799,999,997 (27.69%) add_noise
+# 1,300,000,012 (20.00%) init_b
+# 1,200,000,013 (18.46%) reduction
+#
+# Ir = Instruction reads (number of instructions executed)
+# Use this to calculate sequential fraction:
+#   fs = Ir(sequential) / Ir(total)
+
+# ============================================================
+# 11. TROUBLESHOOTING
+# ============================================================
+
+# Error: "Cannot connect to the Docker daemon"
+# Solution: Start Docker Desktop application
+
+# Error: "no matching manifest for linux/amd64"
+# Solution: Ensure --platform linux/amd64 is specified
+
+# Error: Memory allocation failed in Valgrind
+# Solution: Use smaller N values (Valgrind has ~10x memory overhead)
+
+# Slow performance
+# Note: x86_64 emulation on ARM is slow. Be patient with Valgrind.
